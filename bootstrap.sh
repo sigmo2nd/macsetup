@@ -52,6 +52,11 @@ warn(){ c "0;33" "  ! $1"; }
 die(){ c "0;31" "  ✗ $1"; exit 1; }
 
 [ "$(uname -s)" = "Darwin" ] || die "맥에서만 돈다"
+
+# 프롬프트만 (여러 대에 뿌릴 때 lib/setup-prompt.sh 가 이 모드로 부른다)
+if [ "${1:-}" = "--prompt-only" ]; then
+  step "zsh 프롬프트"; install_prompt; exit 0
+fi
 c "1;35" "역할: $ROLE   ($(hostname -s))"
 
 # ── 1. Homebrew ────────────────────────────────────────────────
@@ -115,13 +120,20 @@ elif "$BREW" list --formula tailscale >/dev/null 2>&1; then
 else
   "$BREW" install tailscale
   TS_CLI="/opt/homebrew/bin/tailscale"
-  # 데몬 등록 — 부팅에 자동으로 뜬다 (sudo 필요)
-  warn "tailscaled 를 등록한다 (관리자 암호)"
-  sudo "$BREW" services start tailscale || warn "서비스 등록 실패 — 'sudo brew services start tailscale' 을 직접"
   ok "설치했다"
+  # ⚠️ 데몬 등록엔 sudo 가 필요한데, **파이프로 들어온 SSH 에는 tty 가 없어** 암호를 못 묻는다
+  #    (`ssh HOST 'bash -s' < bootstrap.sh` 가 그 경우다). 그때는 시키지 말고 알려만 준다.
+  if [ -t 0 ] && sudo -v 2>/dev/null; then
+    sudo "$BREW" services start tailscale && ok "tailscaled 등록 (부팅에 자동)" \
+      || warn "서비스 등록 실패 — 'sudo brew services start tailscale'"
+  else
+    warn "데몬 등록은 **그 기계의 터미널에서** 해야 한다 (여기선 암호를 못 묻는다):"
+    echo "      sudo brew services start tailscale"
+    echo "      sudo tailscale up --ssh"
+  fi
 fi
 
-if [ -n "${TS_AUTHKEY:-}" ]; then
+if [ -n "${TS_AUTHKEY:-}" ] && { [ -t 0 ] || sudo -n true 2>/dev/null; }; then
   # ⚠️ 인증키는 **인자로 흘리면 프로세스 목록에 뜬다.** 환경변수로만 받는다.
   if sudo "$TS_CLI" up --authkey="$TS_AUTHKEY" --ssh 2>/dev/null; then
     ok "메시에 붙었다 — $("$TS_CLI" ip -4 2>/dev/null | head -1)"
@@ -136,16 +148,57 @@ else
 fi
 
 # ── 5. 프롬프트 ─────────────────────────────────────────────────
-step "zsh 프롬프트"
-if [ -x "$HERE/lib/setup-prompt.sh" ]; then
-  "$HERE/lib/setup-prompt.sh" --local
+# ⚠️ **여기 안에 들어 있다.** 처음엔 lib/setup-prompt.sh 를 부르고, 없으면 GitHub 에서
+#    받게 했는데 — 저장소가 비공개라 raw 가 **404** 였다. 그리고 `ssh HOST 'bash -s' <
+#    bootstrap.sh` 로 보내면 애초에 lib 이 안 따라간다. 한 파일로 서야 한다.
+#    (lib/setup-prompt.sh 는 여러 대에 뿌리는 용도로 남아 있고, 그것도 이 파일을 보낸다.)
+install_prompt() {
+  local RC="$HOME/.zshrc"
+  local B="# >>> touchbook prompt >>>" E="# <<< touchbook prompt <<<"
+  [ -f "$RC" ] && cp "$RC" "$RC.bak.$(date +%Y%m%d%H%M%S)"
+  # 우리 블록 걷기
+  if [ -f "$RC" ] && grep -qF "$B" "$RC"; then
+    local t; t="$(mktemp)"
+    awk -v b="$B" -v e="$E" 'index($0,b){s=1} !s{print} index($0,e){s=0}' "$RC" > "$t"; mv "$t" "$RC"
+  fi
+  # 옛 판(setupomz)이 남긴 블록도 — D01 에 12벌 쌓여 있었다
+  if [ -f "$RC" ] && grep -q "커스텀 프롬프트 설정" "$RC"; then
+    local t; t="$(mktemp)"
+    awk '/커스텀 프롬프트 설정/{s=1} !s{print} s&&/^fi$/{s=0}' "$RC" > "$t"; mv "$t" "$RC"
+    warn "옛 판(setupomz) 블록도 걷어냈다"
+  fi
+  { echo ""; echo "$B"; cat <<'PROMPTEOF'
+# 호스트명 > 디렉터리 git:(브랜치)
+# SSH 로 들어왔으면 호스트명이 **노랑**, 직접 앉았으면 **초록** — 남의 기계에서 명령을
+# 치고 있다는 걸 눈이 먼저 알아채라고.
+setopt PROMPT_SUBST
+if [ -d "$HOME/.oh-my-zsh" ]; then
+  export ZSH="$HOME/.oh-my-zsh"; ZSH_THEME=""; plugins=(git)
+  source "$ZSH/oh-my-zsh.sh"
+  ZSH_THEME_GIT_PROMPT_PREFIX="%{$fg_bold[blue]%}git:(%{$fg[red]%}"
+  ZSH_THEME_GIT_PROMPT_SUFFIX="%{$reset_color%} "
+  ZSH_THEME_GIT_PROMPT_DIRTY="%{$fg[blue]%}) %{$fg[yellow]%}✗"
+  ZSH_THEME_GIT_PROMPT_CLEAN="%{$fg[blue]%})"
+  _tb_git() { git_prompt_info }
 else
-  # curl | bash 로 온 경우 — 저장소가 없으니 받아서 쓴다
-  tmp="$(mktemp)"
-  curl -fsSL https://raw.githubusercontent.com/sigmo2nd/macsetup/main/lib/setup-prompt.sh -o "$tmp"
-  bash "$tmp" --local
-  rm -f "$tmp"
+  autoload -U colors && colors
+  _tb_git() { }
 fi
+if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+  PROMPT='%{$fg_bold[yellow]%}%m%{$reset_color%} > %{$fg_bold[cyan]%}%c%{$reset_color%} $(_tb_git)'
+else
+  PROMPT='%{$fg_bold[green]%}%m%{$reset_color%} > %{$fg_bold[cyan]%}%c%{$reset_color%} $(_tb_git)'
+fi
+export LS_COLORS="di=1;36:ln=1;35:so=1;32:pi=1;33:ex=31:bd=34;46:cd=34;43:su=30;41:sg=30;46:tw=30;42:ow=34;43"
+alias ls="ls -G"; alias ll="ls -alF"; alias la="ls -A"; alias l="ls -CF"
+alias grep="grep --color=auto"
+PROMPTEOF
+    echo "$E"; } >> "$RC"
+  ok "$RC 에 프롬프트를 넣었다"
+}
+
+step "zsh 프롬프트"
+install_prompt
 
 # ── 끝 ─────────────────────────────────────────────────────────
 step "끝"

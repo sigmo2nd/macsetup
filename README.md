@@ -3,14 +3,32 @@
 **새 맥에 앉아서 한 줄.** 개발/서버 환경을 세운다.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sigmo2nd/macsetup/main/bootstrap.sh | bash
+# 마스터(맥북)에서 접속지로 — 이게 실제로 쓰는 길이다
+ssh A07 'bash -s' < bootstrap.sh
+
+# 그 기계에 직접 앉아서
+git clone git@github.com:sigmo2nd/macsetup.git && ./macsetup/bootstrap.sh
 ```
 
-## 손으로 해야 하는 것은 둘뿐
+⚠️ **`curl … | bash` 한 줄은 안 된다** — 저장소가 비공개라 raw 가 404 다.
+공개로 돌리면 그때 쓸 수 있다(비밀은 하나도 안 들어 있다).
+
+## 손으로 해야 하는 것
 
 1. **시스템 설정 → 일반 → 공유 → 원격 로그인(SSH) 켜기**
    이게 켜져야 그 뒤로는 전부 원격에서 된다.
-2. 스크립트가 묻는 **관리자 암호** (Homebrew 설치 · Tailscale 데몬 등록)
+2. **관리자 암호가 필요한 둘** — Homebrew 설치, Tailscale 데몬 등록.
+
+⚠️ **파이프로 보내면 sudo 를 못 쓴다.** `ssh HOST 'bash -s' < bootstrap.sh` 에는 tty 가
+없어 암호를 물을 수 없다. 스크립트가 그걸 알아채고 **시키지 않고 알려만 준다** —
+그 둘은 그 기계 터미널에서 한 번 치면 된다:
+
+```bash
+sudo brew services start tailscale
+sudo tailscale up --ssh
+```
+
+(`ssh -t HOST` 로 붙어서 돌리면 암호를 물을 수는 있다.)
 
 ⭐ Tailscale 인증키를 미리 주면 **가입까지 자동**이라 브라우저도 안 연다:
 
