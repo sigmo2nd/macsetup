@@ -142,9 +142,15 @@ for host in "${HOSTS[@]}"; do
 
   if [ "$WITH_KEYS" = "1" ]; then
     step "설정 넘기기"
-    # 🟡 목록이지 값이 아니다 — 복사해도 된다
+    # 🟡 목록이지 값이 아니다 — 복사해도 된다.
+    # ⚠️ 다만 **키를 가리키는 줄은 갈아 끼운다.** 마스터의 config 에는
+    #    `Host github.com / IdentityFile ~/.ssh/github_id_rsa` 가 들어 있는데, 접속지엔
+    #    그 파일이 없다 — 그대로 복사하면 ssh 가 「no such identity」로 **그 기계 제 키를
+    #    안 써 본 채** 실패한다(실측). 접속지는 §키에서 만든 id_ed25519 를 쓴다.
     if [ -f "$HOME/.ssh/config" ]; then
-      scp -q "$HOME/.ssh/config" "$host:~/.ssh/config" && ok "~/.ssh/config (호스트 목록)"
+      sed 's#IdentityFile .*github_id_rsa#IdentityFile ~/.ssh/id_ed25519#' "$HOME/.ssh/config" \
+        | ssh "$host" 'cat > ~/.ssh/config && chmod 600 ~/.ssh/config' \
+        && ok "~/.ssh/config (호스트 목록 — github 키는 이 기계 것으로)"
     fi
 
     # ⭐ **토큰을 보내는 대신 마스터가 대신 등록한다.**
