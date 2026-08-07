@@ -20,8 +20,15 @@
 ## 1차 — 게이트웨이
 
 ```bash
-git clone git@github.com:sigmo2nd/macsetup.git && ./macsetup/bootstrap.sh
+# 공개 저장소라 한 줄로 된다 (새 기계엔 아직 열쇠가 없다)
+curl -fsSL https://raw.githubusercontent.com/sigmo2nd/macsetup/main/bootstrap.sh -o /tmp/b.sh && bash /tmp/b.sh
+
+# 또는
+git clone https://github.com/sigmo2nd/macsetup.git && ./macsetup/bootstrap.sh
 ```
+
+⚠️ `curl … | bash` 로 **파이프**하지 마라 — sudo 가 stdin 을 못 읽어 암호를 못 묻는다.
+받아서 실행한다(위처럼).
 
 **손으로 할 것:**
 
@@ -55,7 +62,28 @@ TS_AUTHKEY=tskey-auth-… ./bootstrap.sh
 | 🔴 | **복사** | 터널 신원·백업 암호 같은 **신원 그 자체**. 새로 만들면 옛 것이 죽는다 → 비밀번호 관리자를 거친다. 스크립트가 **안 옮긴다** |
 | 🟢 | **생성** | SSH 키 — 기계마다 따로. `--keys` 는 키를 **만들어 공개키를 보여줄 뿐** 개인키를 안 옮긴다 |
 | 🟡 | 복사 | `~/.ssh/config` — 값이 아니라 **목록**이다 |
+| ⭐ | 대신 등록 | **GitHub 키는 마스터가 대신 올린다.** 토큰을 접속지로 안 보낸다 |
 | ⛔ | 안 함 | 도구 설정·남의 프로젝트. 이사는 짐을 줄일 기회다 |
+
+### ⭐ GitHub — 토큰을 보내지 않는다
+
+접속지에 토큰을 주면 그 기계가 **마스터와 같은 권한**을 갖는다 — 서버 한 대가 털리면
+GitHub 전체가 털린다. 그래서 이렇게 한다:
+
+```
+접속지에서 키를 만든다  →  마스터가 그 **공개키만** GitHub 에 올린다
+                        →  접속지는 제 열쇠로 clone 한다 (읽기만)
+                        →  나중에 그 키 하나만 지우면 그 기계만 끊긴다
+```
+
+`gh` 는 접속지에도 깔되 **로그인은 안 시킨다.** 거기서 쓰고 싶으면 그 기계에서
+`gh auth login` 하면 된다.
+
+⚠️ 마스터의 gh 토큰에 `admin:public_key` 범위가 필요하다. 없으면 스크립트가 알려 준다:
+
+```bash
+gh auth refresh -s admin:public_key
+```
 
 ## 역할 — 마스터와 접속지
 

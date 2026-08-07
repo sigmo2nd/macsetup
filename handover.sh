@@ -72,6 +72,14 @@ if [ -x "/opt/homebrew/bin/python${PYV}" ]; then skip "Python $("/opt/homebrew/b
   "$BREW" install "python@${PYV}" >/dev/null && ok "Python ${PYV} 설치"
 fi
 
+# gh — **설치만 한다. 로그인은 안 시킨다.**
+# 토큰을 접속지로 보내면 그 기계가 마스터와 같은 권한을 갖는다. 아래에서 마스터가
+# 이 기계의 **공개키만** 대신 등록해 주므로, 저장소 clone 에는 gh 로그인이 필요 없다.
+# 나중에 그 기계에서 gh 를 쓰고 싶으면 거기서 `gh auth login` 하면 된다.
+if command -v gh >/dev/null 2>&1; then skip "gh 이미 있다"; else
+  "$BREW" install gh >/dev/null && ok "gh 설치 (로그인은 안 했다)"
+fi
+
 # 프롬프트
 RC="$HOME/.zshrc"; B="# >>> touchbook prompt >>>"; E="# <<< touchbook prompt <<<"
 [ -f "$RC" ] && cp "$RC" "$RC.bak.$(date +%Y%m%d%H%M%S)"
@@ -138,8 +146,34 @@ for host in "${HOSTS[@]}"; do
     if [ -f "$HOME/.ssh/config" ]; then
       scp -q "$HOME/.ssh/config" "$host:~/.ssh/config" && ok "~/.ssh/config (호스트 목록)"
     fi
+
+    # ⭐ **토큰을 보내는 대신 마스터가 대신 등록한다.**
+    #    접속지에 토큰을 주면 그 기계가 마스터와 같은 권한을 갖는다 — 서버 한 대가
+    #    털리면 GitHub 전체가 털린다. 공개키만 올리면 그 기계는 **읽기 권한만** 갖고,
+    #    나중에 그 키 하나만 지우면 그 기계만 끊긴다.
+    if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+      pub="$(ssh "$host" 'cat ~/.ssh/id_ed25519.pub' 2>/dev/null || true)"
+      if [ -n "$pub" ]; then
+        title="$host ($(date +%Y-%m-%d))"
+        if gh ssh-key list 2>/dev/null | grep -qF "$(echo "$pub" | awk '{print $2}')"; then
+          skip "GitHub 에 이미 등록된 키다"
+        else
+          printf '%s\n' "$pub" | gh ssh-key add - --title "$title" >/dev/null 2>&1 \
+            && ok "GitHub 에 등록했다 — \"$title\"" \
+            || warn "GitHub 등록 실패 (권한 범위? 'gh auth refresh -s admin:public_key')"
+        fi
+        # 진짜 되는지 본다 — 등록했다는 말보다 붙는 게 증거다
+        if ssh "$host" 'ssh -o StrictHostKeyChecking=accept-new -T git@github.com 2>&1 | head -1' 2>/dev/null | grep -q "successfully authenticated"; then
+          ok "이 기계가 GitHub 에 제 열쇠로 붙는다"
+        else
+          warn "아직 GitHub 인증이 안 된다 (등록 반영에 몇 초 걸릴 수 있다)"
+        fi
+      fi
+    else
+      warn "마스터에 gh 로그인이 없다 — 공개키를 손으로 등록해라"
+    fi
+
     warn "🔴 신원(터널 자격·백업 암호)은 **여기서 안 옮긴다** — 비밀번호 관리자를 거쳐라"
-    warn "🟢 위 공개키를 GitHub·서버 authorized_keys 에 등록하면 이 기계가 제 열쇠로 선다"
   fi
 done
 
